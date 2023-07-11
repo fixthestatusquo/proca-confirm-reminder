@@ -17,7 +17,7 @@ const queueConfirm = process.env.CONFIRM_QUEUE || args.qc || "";
 const queueConfirmed = process.env.CONFIRMED_QUEUE || args.qd || "";
 const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
-const maxPeriod = retryArray.reduce((max, d) => (max + d), 0);
+const maxPeriod = retryArray.reduce((max, d) => (max + d), 0) + 2;
 const maxRetries = retryArray.length + 1;
 
 // debug
@@ -41,9 +41,7 @@ type DoneRecord = {
   done: boolean;
 }
 
-//TODO: run every 10 min
-
-const job = schedule.scheduleJob('* * * * *', async () => {
+const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', async () => {
   console.log('running every minute', maxRetries);
 
   const conn = await amqplib.connect(amqp_url);
