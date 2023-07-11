@@ -5,6 +5,7 @@ import { Level } from "level";
 import schedule from "node-schedule";
 import parseArg from "minimist";
 import dotenv from 'dotenv';
+import { error } from 'console';
 
 dotenv.config();
 
@@ -117,20 +118,27 @@ syncQueue(amqp_url, queueConfirm, async (action: ActionMessageV2 | EventMessageV
           throw error;
         }
       }
-      return;
+      return true;
     }
     console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
       await db.put<string, DoneRecord>('done-' + action.actionId, { done: false}, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
   }
+  return true;
 })
 
 syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
   if (action.schema === 'proca:action:2') {
     console.log("Confirmed:", action.actionId);
-    await db.put<string, DoneRecord>('done-' + action.actionId, { done: true }, {});
-    await db.del('action-' + action.actionId);
-    await db.del('retry-' + action.actionId);
+    try {
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: true }, {});
+      await db.del('action-' + action.actionId);
+      await db.del('retry-' + action.actionId);
+    } catch (e) {
+      console.error(`Error removing confirmed action ${action.actionId} record from DB`, e);
+      throw e;
+    }
   }
+  return true;
 })

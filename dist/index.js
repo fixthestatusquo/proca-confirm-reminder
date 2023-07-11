@@ -36,56 +36,50 @@ const queueConfirm = process.env.CONFIRM_QUEUE || args.qc || "";
 const queueConfirmed = process.env.CONFIRMED_QUEUE || args.qd || "";
 const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
-const maxPeriod = retryArray.reduce((max, d) => (max + d), 0);
+const maxPeriod = retryArray.reduce((max, d) => (max + d), 0) + 2;
 const maxRetries = retryArray.length + 1;
 // debug
 const debugDayOffset = parseInt(process.env.ADD_DAYS || args.A || "0");
 const amqp_url = `amqps://${user}:${pass}@api.proca.app/proca_live`;
-//TODO: run every 10 min
-const job = node_schedule_1.default.scheduleJob('* * * * *', () => __awaiter(void 0, void 0, void 0, function* () {
+const job = node_schedule_1.default.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', () => __awaiter(void 0, void 0, void 0, function* () {
     var _a, e_1, _b, _c;
     console.log('running every minute', maxRetries);
     const conn = yield amqplib_1.default.connect(amqp_url);
     const chan = yield conn.createChannel();
     try {
         try {
-            for (var _d = true, _e = __asyncValues(db.iterator({ gt: 'retry-' })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
+            for (var _d = true, _e = __asyncValues(db.iterator({ gt: 'retry-' })), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                 _c = _f.value;
                 _d = false;
-                try {
-                    const [key, value] = _c;
-                    // console.log("Confirm:", key, value);
-                    const actionId = key.split("-")[1];
-                    // we already had max retries, or retry record is too old
-                    if (value.attempts >= maxRetries || !(0, helpers_1.retryValid)(value.retry, maxPeriod)) { // attempts counts also 1st normal confirm
-                        const msg = value.attempts >= maxRetries
-                            ? `Confirm ${actionId} had already ${value.attempts}, deleting`
-                            : `Confirm ${actionId} expired. ${value.retry}, deleting`;
-                        console.log(msg);
-                        yield db.put('done-' + actionId, { done: false }, {});
-                        yield db.del('action-' + actionId);
-                        yield db.del('retry-' + actionId);
-                    }
-                    else {
-                        const today = new Date();
-                        today.setDate(today.getDate() + debugDayOffset);
-                        // check if it is time for reminder
-                        if ((new Date(value.retry)) < today && value.attempts < maxRetries) {
-                            console.log(`Reminding action ${actionId} (due ${value.retry})`);
-                            // publish
-                            const action = yield db.get("action-" + actionId, {});
-                            action.action.customFields.reminder = true;
-                            const r = yield chan.publish(remindExchange, action.action.actionType + '.' + action.campaign.name, Buffer.from(JSON.stringify(action)));
-                            console.log('publish', r);
-                            // change retry record
-                            let retry = yield db.get("retry-" + actionId, {});
-                            retry = { retry: (0, helpers_1.changeDate)(value.retry, value.attempts + 1, retryArray), attempts: value.attempts + 1 };
-                            yield db.put('retry-' + actionId, retry, {});
-                        }
-                    }
+                const [key, value] = _c;
+                // console.log("Confirm:", key, value);
+                const actionId = key.split("-")[1];
+                // we already had max retries, or retry record is too old
+                if (value.attempts >= maxRetries || !(0, helpers_1.retryValid)(value.retry, maxPeriod)) { // attempts counts also 1st normal confirm
+                    const msg = value.attempts >= maxRetries
+                        ? `Confirm ${actionId} had already ${value.attempts}, deleting`
+                        : `Confirm ${actionId} expired. ${value.retry}, deleting`;
+                    console.log(msg);
+                    yield db.put('done-' + actionId, { done: false }, {});
+                    yield db.del('action-' + actionId);
+                    yield db.del('retry-' + actionId);
                 }
-                finally {
-                    _d = true;
+                else {
+                    const today = new Date();
+                    today.setDate(today.getDate() + debugDayOffset);
+                    // check if it is time for reminder
+                    if ((new Date(value.retry)) < today && value.attempts < maxRetries) {
+                        console.log(`Reminding action ${actionId} (due ${value.retry})`);
+                        // publish
+                        const action = yield db.get("action-" + actionId, {});
+                        action.action.customFields.reminder = true;
+                        const r = yield chan.publish(remindExchange, action.action.actionType + '.' + action.campaign.name, Buffer.from(JSON.stringify(action)));
+                        console.log('publish', r);
+                        // change retry record
+                        let retry = yield db.get("retry-" + actionId, {});
+                        retry = { retry: (0, helpers_1.changeDate)(value.retry, value.attempts + 1, retryArray), attempts: value.attempts + 1 };
+                        yield db.put('retry-' + actionId, retry, {});
+                    }
                 }
             }
         }
@@ -125,19 +119,27 @@ const job = node_schedule_1.default.scheduleJob('* * * * *', () => __awaiter(voi
                     throw error;
                 }
             }
-            return;
+            return true;
         }
         console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
         yield db.put('done-' + action.actionId, { done: false }, {});
         yield db.del('action-' + action.actionId);
         yield db.del('retry-' + action.actionId);
     }
+    return true;
 }));
 (0, queue_1.syncQueue)(amqp_url, queueConfirmed, (action) => __awaiter(void 0, void 0, void 0, function* () {
     if (action.schema === 'proca:action:2') {
         console.log("Confirmed:", action.actionId);
-        yield db.put('done-' + action.actionId, { done: true }, {});
-        yield db.del('action-' + action.actionId);
-        yield db.del('retry-' + action.actionId);
+        try {
+            yield db.put('done-' + action.actionId, { done: true }, {});
+            yield db.del('action-' + action.actionId);
+            yield db.del('retry-' + action.actionId);
+        }
+        catch (e) {
+            console.error(`Error removing confirmed action ${action.actionId} record from DB`, e);
+            throw e;
+        }
     }
+    return true;
 }));
