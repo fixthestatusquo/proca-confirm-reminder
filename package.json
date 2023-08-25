@@ -31,7 +31,7 @@
     "typescript": "^5.1.6"
   },
   "devDependencies": {
-    "@types/amqplib": "^0.8.2",
+    "@types/amqplib": "^0.10.1",
     "@types/minimist": "^1.2.2",
     "nodemon": "^2.0.20",
     "ts-node": "^10.9.1"
