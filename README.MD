@@ -7,8 +7,7 @@ This service is used to re-send the DOI if supporters ignore a previous one.
 
 ## Build and install
 
-- `yarn build` - builds it, use `yarn publish` to publish to npm
-- It installs a `confirm-reminder` command in the system
+- `npm build` publish to npm
 
 
 ## Do you understand RabbitMQ queue vs exchange?
