@@ -10,15 +10,6 @@ This service is used to re-send the DOI if supporters ignore a previous one.
 - `npm build` publish to npm
 
 
-## Do you understand RabbitMQ queue vs exchange?
-
-In RabbitMQ, an exchange is a message routing agent that receives messages from producers and routes them to message queues. It's like a post office, where the exchange decides where to deliver messages based on the message's routing key. Exchanges come in several types, such as direct, topic, fanout, and headers, which determine how messages are routed.
-
-When a message is sent to an exchange, the exchange will route the message to one or more queues that are bound to it. Queues are like buffers that hold messages until they can be processed. A message can be routed to multiple queues if they are bound to the same exchange. This is useful in scenarios where multiple consumers need to receive the same message for processing.
-
-For example, let's say we have two queues, Queue A and Queue B, that are both bound to the same exchange. When a message is sent to the exchange, the exchange will route a copy of the message to both Queue A and Queue B, allowing multiple consumers to process the same message simultaneously.
-
-In summary, when two queues are bound to the same exchange, they will both receive a copy of any message that is sent to that exchange, allowing multiple consumers to receive and process the same message.
 
 ## How does it work
 
@@ -96,6 +87,15 @@ If we successfully restart the service reminders will be sent to all supporters 
 
 \*queueConfirmed - cus.ORG_ID.confirmed
 
+## Do you understand RabbitMQ queue vs exchange?
+
+In RabbitMQ, an exchange is a message routing agent that receives messages from producers and routes them to message queues. It's like a post office, where the exchange decides where to deliver messages based on the message's routing key. Exchanges come in several types, such as direct, topic, fanout, and headers, which determine how messages are routed.
+
+When a message is sent to an exchange, the exchange will route the message to one or more queues that are bound to it. Queues are like buffers that hold messages until they can be processed. A message can be routed to multiple queues if they are bound to the same exchange. This is useful in scenarios where multiple consumers need to receive the same message for processing.
+
+For example, let's say we have two queues, Queue A and Queue B, that are both bound to the same exchange. When a message is sent to the exchange, the exchange will route a copy of the message to both Queue A and Queue B, allowing multiple consumers to process the same message simultaneously.
+
+In summary, when two queues are bound to the same exchange, they will both receive a copy of any message that is sent to that exchange, allowing multiple consumers to receive and process the same message.
 ## Configuration
 
 - `DB_PATH` - Path to LevelDB (it's a directory) eg `/srv/confirm-reminder/lobbycontrol`
