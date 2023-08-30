@@ -42,11 +42,11 @@ and now more details...
 
 # Confirm reminder
 
-Action taken from the queue can have two kinds of records in the Level database.
+Action taken from the queue can have three kinds of records in the Level database.
 
 - Action record - key: 'action + actionId', value: action;
 - Retry record - key: 'retry+ actionId', value: retry date, attempts
-- Done record - key: 'done + actionId', value: done (true if the action gets confirmed, false if not)
+- Done record - key: 'done + actionId', value: done , status, date [2]
 
 If the action gets confirmed or reminders have been sent max times, retry and the action record will be deleted.
 
@@ -102,3 +102,4 @@ In summary, when two queues are bound to the same exchange, they will both recei
 - `RETRY_INTERVAL` - interval in days between consecutive attempts to send confirm email: `2,3` = try after 2 days and then again after 3 days.
 
 [1] For Reminder 5.0.0 CONFIRM_QUEUE is renamed to UNCONFIRMED_QUEUE
+[2] `done`: boolean, `status`: - if done: true - confirmed_after_NUMBER - if done: false - dropped or max_retries, `date`: timestamp
