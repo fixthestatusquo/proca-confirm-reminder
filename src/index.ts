@@ -5,6 +5,7 @@ import { Level } from "level";
 import schedule from "node-schedule";
 import parseArg from "minimist";
 import dotenv from 'dotenv';
+import { LevelError, RetryRecord, DoneRecord } from './types';
 
 dotenv.config();
 
@@ -25,24 +26,6 @@ const jobInterval = process.env.JOB_INTERVAL || '0 10 * * *'
 const debugDayOffset = parseInt(process.env.ADD_DAYS || args.A || "0");
 
 const amqp_url = `amqps://${user}:${pass}@api.proca.app/proca_live`;
-
-// types
-type LevelError = {
-  code: string;
-  notFound: boolean;
-  status: number;
-};
-
-type RetryRecord = {
-  attempts: number;
-  retry: string;
-};
-
-type DoneRecord = {
-  done: boolean;
-  status: string;
-  date: number;
-}
 
 const job = schedule.scheduleJob(jobInterval, async () => {
   console.log(`Running at ${jobInterval}, max retries: ${maxRetries}`);
