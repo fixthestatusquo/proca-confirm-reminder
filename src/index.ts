@@ -18,12 +18,15 @@ const queueUnconfirmed = process.env.UNCONFIRMED_QUEUE || args.qc || "";
 const queueConfirmed = process.env.CONFIRMED_QUEUE || args.qd || "";
 const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
-const maxPeriod = retryArray.reduce((max, d) => (max + d), 0) + 2;
 const maxRetries = retryArray.length + 1;
 const jobInterval = process.env.JOB_INTERVAL || '0 10 * * *'
 
 // debug
 const debugDayOffset = parseInt(process.env.ADD_DAYS || args.A || "0");
+
+const maxPeriod = process.env.MAX_PERIOD
+  ? parseInt(process.env.MAX_PERIOD)
+  : retryArray.reduce((max, d) => (max + d), 0) + 2;
 
 const amqp_url = `amqps://${user}:${pass}@api.proca.app/proca_live`;
 
@@ -35,7 +38,7 @@ const job = schedule.scheduleJob(jobInterval, async () => {
 
   try {
     for await (const [key, value] of db.iterator<string, RetryRecord>({ gt: 'retry-' })) {
-      // console.log("Confirm:", key, value);
+
       const actionId = key.split("-")[1];
 
       // we already had max retries, or retry record is too old
@@ -46,8 +49,9 @@ const job = schedule.scheduleJob(jobInterval, async () => {
 
         const status = value.attempts >= maxRetries ? "max_retries" : "dropped";
 
-        //logging what is happened
+        //logging what happened
         console.log(msg);
+
         await db.put<string, DoneRecord>('done-' + actionId, { done: false, status: status, date: Date.now() }, {});//date created
         await db.del('action-' + actionId);
         await db.del('retry-' + actionId);
@@ -59,7 +63,7 @@ const job = schedule.scheduleJob(jobInterval, async () => {
         // check if it is time for reminder
         if ((new Date(value.retry)) < today && value.attempts < maxRetries) {
 
-          console.log(`Reminding action ${actionId} (due ${value.retry})`);
+          console.log(`Reminding action ${actionId} (due ${value.retry}), retry ${value.attempts}`);
 
           // publish
           const action = await db.get<string, ActionMessageV2>("action-" + actionId, {});
@@ -68,8 +72,7 @@ const job = schedule.scheduleJob(jobInterval, async () => {
           const r = await chan.publish(remindExchange,
                                        action.action.actionType + '.' + action.campaign.name,
                                        Buffer.from(JSON.stringify(action)));
-          console.log('publish', r);//Retried number
-            // change retry record
+
           let retry = await db.get<string, RetryRecord>("retry-" + actionId, {});
           retry = { retry: changeDate(value.retry, value.attempts+1, retryArray), attempts: value.attempts + 1};
           await db.put<string, RetryRecord>('retry-' + actionId, retry, {});
@@ -83,25 +86,18 @@ const job = schedule.scheduleJob(jobInterval, async () => {
 });
 
 syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
-  if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) { //else process.exit for just in case
-    console.log(`Unconfirmed action `, action.actionId);
+  if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) {
+        console.log(`Unconfirmed action `, action.actionId);
 
-
-
-   // await db.put<string, ActionMessageV2>('action-' + action.actionId, action, {});
-
-// catch { rearrange theorged
-
-
-    // Don't remind if action from the queue is too old
-    if (retryValid(action.action.createdAt, maxPeriod)) { //esle here
+    if (retryValid(action.action.createdAt, maxPeriod)) {
       try {
         // ignore if we have it
         const _payload = await db.get('action-' + action.actionId);
-        //log sometng
+        console.log(`Action ${action.actionId} already saved, skipping`)
       } catch (_error) {
+        // The default action logic is reversed because LevelDB's "put"
+        // doesn't return an error (or anything) if record exists. It just update it
         const error = _error as LevelError;
-
         if (error.notFound) {
           await db.put<string, ActionMessageV2>('action-' + action.actionId, action, {});
           const retry = { retry: changeDate(action.action.createdAt, 1, retryArray), attempts: 1 };
@@ -115,16 +111,23 @@ syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMess
       }
       return true;
     }
+    // Don't remind if action from the queue is too old
     console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
       await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped", date: Date.now()}, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
+  } else {
+    console.error(`Completely unexpected event", ${queueUnconfirmed}`);
+    return false;
   }
   return true;
 })
 
 syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
-  if (action.schema === 'proca:action:2') {
+  if (action.schema !== 'proca:action:2') {
+    console.error(`Completely unexpected event", ${queueConfirmed}`);
+    return false;
+  }
     console.log("Confirmed:", action.actionId);
     try {
       const retryRecord = await db.get<string, RetryRecord>("retry-" + action.actionId, {});
@@ -135,6 +138,5 @@ syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessag
       console.error(`Error removing confirmed action ${action.actionId} record from DB`, e);
       throw e;
     }
-  }
   return true;
 })
