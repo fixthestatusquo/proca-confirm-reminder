@@ -41,6 +41,7 @@ type RetryRecord = {
 type DoneRecord = {
   done: boolean;
   status: string;
+  date: number;
 }
 
 const job = schedule.scheduleJob(jobInterval, async () => {
@@ -64,7 +65,7 @@ const job = schedule.scheduleJob(jobInterval, async () => {
 
         //logging what is happened
         console.log(msg);
-        await db.put<string, DoneRecord>('done-' + actionId, { done: false, status: status }, {});//date created
+        await db.put<string, DoneRecord>('done-' + actionId, { done: false, status: status, date: Date.now() }, {});//date created
         await db.del('action-' + actionId);
         await db.del('retry-' + actionId);
       } else {
@@ -100,7 +101,7 @@ const job = schedule.scheduleJob(jobInterval, async () => {
 
 syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
   if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) { //else process.exit for just in case
-    console.log(`New confirm `, action.actionId);
+    console.log(`Unconfirmed action `, action.actionId);
 
 
 
@@ -132,7 +133,7 @@ syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMess
       return true;
     }
     console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
-      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped"}, {});
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped", date: Date.now()}, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
   }
@@ -143,9 +144,8 @@ syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessag
   if (action.schema === 'proca:action:2') {
     console.log("Confirmed:", action.actionId);
     try {
-      const retryRecord = await db.get<string, ActionMessageV2>("retry-" + action.actionId, {});
-      console.log("ret", retryRecord);
-      await db.put<string, DoneRecord>('done-' + action.actionId, { done: true, status: `confirmed_after_` }, {});
+      const retryRecord = await db.get<string, RetryRecord>("retry-" + action.actionId, {});
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: true, status: `confirmed_after_${retryRecord.attempts}`, date: Date.now() }, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
     } catch (e) {
