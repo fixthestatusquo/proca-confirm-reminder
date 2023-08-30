@@ -5,7 +5,6 @@ import { Level } from "level";
 import schedule from "node-schedule";
 import parseArg from "minimist";
 import dotenv from 'dotenv';
-import { error } from 'console';
 
 dotenv.config();
 
@@ -14,7 +13,7 @@ const args = parseArg(process.argv.slice(2));
 const db = new Level(process.env.DB_PATH || args.db || "./reminder.db", { valueEncoding: 'json' })
 const user = process.env.RABBIT_USER || args.user;
 const pass = process.env.RABBIT_PASSWORD || args.password;
-const queueConfirm = process.env.CONFIRM_QUEUE || args.qc || "";
+const queueUnconfirmed = process.env.UNCONFIRMED_QUEUE || args.qc || "";
 const queueConfirmed = process.env.CONFIRMED_QUEUE || args.qd || "";
 const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
@@ -42,7 +41,7 @@ type DoneRecord = {
   done: boolean;
 }
 
-const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', async () => {
+const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 10 * * *', async () => {
   console.log('running every minute', maxRetries);
 
   const conn = await amqplib.connect(amqp_url);
@@ -60,7 +59,7 @@ const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', async 
           : `Confirm ${actionId} expired. ${value.retry}, deleting`;
 
         console.log(msg);
-        await db.put<string, DoneRecord>('done-' + actionId, { done: false }, {});
+        await db.put<string, DoneRecord>('done-' + actionId, { done: false }, {});//date created
         await db.del('action-' + actionId);
         await db.del('retry-' + actionId);
       } else {
@@ -80,7 +79,7 @@ const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', async 
           const r = await chan.publish(remindExchange,
                                        action.action.actionType + '.' + action.campaign.name,
                                        Buffer.from(JSON.stringify(action)));
-          console.log('publish', r);
+          console.log('publish', r);//Retried number
             // change retry record
           let retry = await db.get<string, RetryRecord>("retry-" + actionId, {});
           retry = { retry: changeDate(value.retry, value.attempts+1, retryArray), attempts: value.attempts + 1};
@@ -94,17 +93,24 @@ const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 8 * * *', async 
   }
 });
 
-syncQueue(amqp_url, queueConfirm, async (action: ActionMessageV2 | EventMessageV2) => {
-  if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) {
+syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
+  if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) { //else process.exit for just in case
     console.log(`New confirm `, action.actionId);
 
+
+
+   // await db.put<string, ActionMessageV2>('action-' + action.actionId, action, {});
+
+// catch { rearrange theorged
+
+
     // Don't remind if action from the queue is too old
-    if (retryValid(action.action.createdAt, maxPeriod)) {
+    if (retryValid(action.action.createdAt, maxPeriod)) { //esle here
       try {
         // ignore if we have it
         const _payload = await db.get('action-' + action.actionId);
+        //log sometng
       } catch (_error) {
-        console.error('catch', _error);
         const error = _error as LevelError;
 
         if (error.notFound) {
@@ -112,7 +118,7 @@ syncQueue(amqp_url, queueConfirm, async (action: ActionMessageV2 | EventMessageV
           const retry = { retry: changeDate(action.action.createdAt, 1, retryArray), attempts: 1 };
           await db.put<string, RetryRecord>('retry-' + action.actionId, retry, {});
 
-          console.log(`Scheduled confirm reminder: ${action.actionId}`, action);
+          console.log(`Scheduled confirm reminder: ${action.actionId}`);
         } else {
           console.error(`Error checking if confirm scheduled in DB`, error);
           throw error;
