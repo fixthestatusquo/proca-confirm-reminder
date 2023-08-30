@@ -6,6 +6,21 @@ import schedule from "node-schedule";
 import parseArg from "minimist";
 import dotenv from 'dotenv';
 import { LevelError, RetryRecord, DoneRecord } from './types';
+import minimist, { ParsedArgs } from 'minimist';
+
+const help = () => {
+  console.log(
+    [
+      "--help (this command)",
+      "--get_unconfirmed - if reminder was down, run this first",
+      "--run",
+    ].join("\n")
+  );
+  process.exit();
+};
+
+const argv: ParsedArgs = minimist(process.argv.slice(2));
+argv.help && help();
 
 dotenv.config();
 
@@ -30,7 +45,8 @@ const maxPeriod = process.env.MAX_PERIOD
 
 const amqp_url = `amqps://${user}:${pass}@api.proca.app/proca_live`;
 
-const job = schedule.scheduleJob(jobInterval, async () => {
+if (argv.run) {
+  schedule.scheduleJob(jobInterval, async () => {
   console.log(`Running at ${jobInterval}, max retries: ${maxRetries}`);
 
   const conn = await amqplib.connect(amqp_url);
@@ -84,50 +100,54 @@ const job = schedule.scheduleJob(jobInterval, async () => {
     await conn.close()
   }
 });
+}
 
-syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
-  if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) {
-        console.log(`Unconfirmed action `, action.actionId);
+if (argv.run || argv.get_unconfirmed) {
+  syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
+    if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) {
+      console.log("Unconfirmed action:", action.actionId);
 
-    if (retryValid(action.action.createdAt, maxPeriod)) {
-      try {
-        // ignore if we have it
-        const _payload = await db.get('action-' + action.actionId);
-        console.log(`Action ${action.actionId} already saved, skipping`)
-      } catch (_error) {
-        // The default action logic is reversed because LevelDB's "put"
-        // doesn't return an error (or anything) if record exists. It just update it
-        const error = _error as LevelError;
-        if (error.notFound) {
-          await db.put<string, ActionMessageV2>('action-' + action.actionId, action, {});
-          const retry = { retry: changeDate(action.action.createdAt, 1, retryArray), attempts: 1 };
-          await db.put<string, RetryRecord>('retry-' + action.actionId, retry, {});
+      if (retryValid(action.action.createdAt, maxPeriod)) {
+        try {
+          // ignore if we have it
+          const _payload = await db.get('action-' + action.actionId);
+          console.log(`Action ${action.actionId} already saved, skipping`)
+        } catch (_error) {
+          // The default action logic is reversed because LevelDB's "put"
+          // doesn't return an error (or anything) if record exists. It just update it
+          const error = _error as LevelError;
+          if (error.notFound) {
+            await db.put<string, ActionMessageV2>('action-' + action.actionId, action, {});
+            const retry = { retry: changeDate(action.action.createdAt, 1, retryArray), attempts: 1 };
+            await db.put<string, RetryRecord>('retry-' + action.actionId, retry, {});
 
-          console.log(`Scheduled confirm reminder: ${action.actionId}`);
-        } else {
-          console.error(`Error checking if confirm scheduled in DB`, error);
-          throw error;
+            console.log(`Scheduled confirm reminder: ${action.actionId}`);
+          } else {
+            console.error(`Error checking if confirm scheduled in DB`, error);
+            throw error;
+          }
         }
+        return true;
       }
-      return true;
-    }
-    // Don't remind if action from the queue is too old
-    console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
-      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped", date: Date.now()}, {});
+      // Don't remind if action from the queue is too old
+      console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped", date: Date.now() }, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
-  } else {
-    console.error(`Completely unexpected event", ${queueUnconfirmed}`);
-    return false;
-  }
-  return true;
-})
+    } else {
+      console.error(`Completely unexpected event", ${queueUnconfirmed}`);
+      return false;
+    }
+    return true;
+  })
+}
 
-syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
-  if (action.schema !== 'proca:action:2') {
-    console.error(`Completely unexpected event", ${queueConfirmed}`);
-    return false;
-  }
+if (argv.run) {
+  syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
+    if (action.schema !== 'proca:action:2') {
+      console.error(`Completely unexpected event", ${queueConfirmed}`);
+      return false;
+    }
     console.log("Confirmed:", action.actionId);
     try {
       const retryRecord = await db.get<string, RetryRecord>("retry-" + action.actionId, {});
@@ -138,5 +158,6 @@ syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessag
       console.error(`Error removing confirmed action ${action.actionId} record from DB`, e);
       throw e;
     }
-  return true;
-})
+    return true;
+  })
+}
