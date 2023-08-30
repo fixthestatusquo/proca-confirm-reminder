@@ -19,6 +19,7 @@ const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
 const maxPeriod = retryArray.reduce((max, d) => (max + d), 0) + 2;
 const maxRetries = retryArray.length + 1;
+const jobInterval = process.env.JOB_INTERVAL || '0 10 * * *'
 
 // debug
 const debugDayOffset = parseInt(process.env.ADD_DAYS || args.A || "0");
@@ -39,10 +40,11 @@ type RetryRecord = {
 
 type DoneRecord = {
   done: boolean;
+  status: string;
 }
 
-const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 10 * * *', async () => {
-  console.log('running every minute', maxRetries);
+const job = schedule.scheduleJob(jobInterval, async () => {
+  console.log(`Running at ${jobInterval}, max retries: ${maxRetries}`);
 
   const conn = await amqplib.connect(amqp_url);
   const chan = await conn.createChannel();
@@ -58,8 +60,11 @@ const job = schedule.scheduleJob(process.env.JOB_INTERVAL || '0 10 * * *', async
           ? `Confirm ${actionId} had already ${value.attempts}, deleting`
           : `Confirm ${actionId} expired. ${value.retry}, deleting`;
 
+        const status = value.attempts >= maxRetries ? "max_retries" : "dropped";
+
+        //logging what is happened
         console.log(msg);
-        await db.put<string, DoneRecord>('done-' + actionId, { done: false }, {});//date created
+        await db.put<string, DoneRecord>('done-' + actionId, { done: false, status: status }, {});//date created
         await db.del('action-' + actionId);
         await db.del('retry-' + actionId);
       } else {
@@ -127,7 +132,7 @@ syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMess
       return true;
     }
     console.log(`${action.actionId} created at ${action.action.createdAt} from the confirm queue expired, deleting`);
-      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false}, {});
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: false, status: "dropped"}, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
   }
@@ -138,7 +143,9 @@ syncQueue(amqp_url, queueConfirmed, async (action: ActionMessageV2 | EventMessag
   if (action.schema === 'proca:action:2') {
     console.log("Confirmed:", action.actionId);
     try {
-      await db.put<string, DoneRecord>('done-' + action.actionId, { done: true }, {});
+      const retryRecord = await db.get<string, ActionMessageV2>("retry-" + action.actionId, {});
+      console.log("ret", retryRecord);
+      await db.put<string, DoneRecord>('done-' + action.actionId, { done: true, status: `confirmed_after_` }, {});
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
     } catch (e) {
