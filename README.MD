@@ -5,34 +5,37 @@ This service is used to re-send the DOI if supporters ignore a previous one.
 - It can work with any org (not bound to any CRM etc)
 - It watches how Proca Server is processing actions and injects actions again if they need to send another confirm email.
 
-## Build and install
-
-- `npm build` publish to npm
-
-
-
 ## How does it work
 
-Normal Proca Server workflow:
+We need to monitor two queues:
+
+- `CONFIRM_QUEUE` with double opt-in demands that contains a copy of every action generating a confirmation/double opt-in email, both the initial signature AND the reminders (that are basically a copy of the initial doi)
+- `CONFIRMED_QUEUE` - with all the actions confirmed (ie. where the supporter clicked on the email sent from the confirm queue)
+
+the principle is that we requeue all the messages that we received in the CONFIRM_QUEUE after x days (we send a reminder) unless we received them into the CONFIRMED_QUEUE (we don't send the reminder if the supporter confirmed, obviously)
+
+and now more details...
+
+### Normal Proca Server workflow:
+
+1. a New action for DOI goes into `confirm supporter` queue.
+2. the Build in email worker sends a DOI email
+3. the Supporter clicks a link which results in adding the action to `delivery` queue and `email supporter`, as ACCEPTED.
+4. the Delivery queue is read by CRM syncer, it synces to CRM; the `email supporter` is read by build in email worker, it sends a thank you email.
+
+
+### Proca Workflow with this confirm reminder:
+
 
 1. New action for DOI goes into `confirm supporter` queue.
+1a. The action *also* goes to `cus.xxx.confirm.supporter` because custom supporter confirm was enabled on org.
 2. Build in email worker sends a DOI email
-3. Supporter clicks a link which results in adding the action to `delivery` queue and `email supporter`, as ACCEPTED.
-4. Delivery queue is read by CRM syncer, it synces to CRM; the `email supporter` is read by build in email worker, it sends a thank you email.
-
-
-Proca Workflow with this confirm reminder:
-
-
-1. New action for DOI goes into `confirm supporter` queue.
-1a. The action *also* goes to `cus.310.confirm.supporter` because custom supporter confirm was enabled on org.
-2. Build in email worker sends a DOI email
-2a. Confirm Reminder reads the `cus.310.confirm.supporter`. it can either be a new supporter (it saves it in our local database (LevelDB) - to remember it's due to for confirmation OR
+2a. Confirm Reminder reads the `cus.xxx.confirm.supporter`. it can either be a new supporter (it saves it in our local database (LevelDB) - to remember it's due to for confirmation OR
 2b. this action is a duplicate (send by the reminder in 5.) and we skip it
 3. Supporter clicks a link which results in adding the action to `delivery` queue and `email supporter`, as ACCEPTED
-3a. A copy of action goes into `cus.310.confirmed ` queue, which was created by hand in RabbitMQ admin and connected to `deliver` exchange for that org.
+3a. A copy of action goes into `cus.xxx.confirmed ` queue, which was created by hand in RabbitMQ admin and connected to `deliver` exchange for that org.
 4. Delivery queue is read by CRM syncer, it synces to CRM; the `email supporter` is read by build in email worker, it sends a thank you email.
-4a. `cus.310.confirmed` queue is read by Confirm Reminder, and the action is marked as confirmed in local DB. We are not interested about it any more, because it is confirmed.
+4a. `cus.xxx.confirmed` queue is read by Confirm Reminder, and the action is marked as confirmed in local DB. We are not interested about it any more, because it is confirmed.
 
 5. Every day, we check the local DB to see which actions were unconfirmed and when. We use a `RETRY_INTERVAL=2,3` to wait first 2 days, and then for 3 days, to perform 1st and 2nd attempt to send the email. 
   - If the time is right to re-send the confirm email, we inject the action into supporter confirm exchange `org.310.confirm.supporter`, so the email is send as in point 2.
