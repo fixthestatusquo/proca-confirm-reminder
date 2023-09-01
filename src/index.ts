@@ -47,7 +47,10 @@ const amqp_url = `amqps://${user}:${pass}@api.proca.app/proca_live`;
 
 if (argv.run) {
   schedule.scheduleJob(jobInterval, async () => {
-  console.log(`Running at ${jobInterval}, max retries: ${maxRetries}`);
+    console.log(`Running at ${jobInterval}, max retries: ${maxRetries}`);
+    let sent:number = 0;
+    let expired:number = 0;
+    let maxRetried:number = 0;
 
   const conn = await amqplib.connect(amqp_url);
   const chan = await conn.createChannel();
@@ -71,6 +74,8 @@ if (argv.run) {
         await db.put<string, DoneRecord>('done-' + actionId, { done: false, status: status, date: Date.now() }, {});//date created
         await db.del('action-' + actionId);
         await db.del('retry-' + actionId);
+
+        status === "max_retries" ? maxRetried+=1 : expired+=1
       } else {
 
         const today = new Date()
@@ -92,10 +97,13 @@ if (argv.run) {
           let retry = await db.get<string, RetryRecord>("retry-" + actionId, {});
           retry = { retry: changeDate(value.retry, value.attempts+1, retryArray), attempts: value.attempts + 1};
           await db.put<string, RetryRecord>('retry-' + actionId, retry, {});
+          sent+=1;
         }
       }
     }
   } finally {
+    const date = new Date();
+    console.log(`${date}: Sent ${sent}, dropped ${expired}, done retrying ${maxRetried}`);
     await chan.close();
     await conn.close()
   }
