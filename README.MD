@@ -101,6 +101,12 @@ In summary, when two queues are bound to the same exchange, they will both recei
 - `REMIND_EXCHANGE` - confirm supporter stage exchange `org.ORG_ID.confirm.supporter`
 - `RETRY_INTERVAL` - interval in days between consecutive attempts to send confirm email: `2,3` = try after 2 days and then again after 3 days.
 
+## Reminder 5.0.0
+
+`remind`: "ts-node ./src/index.ts --run",
+`unconfirmed`: "ts-node ./src/index.ts --get_unconfirmed"
+We can get unconfirmed separately. It is recommended to run before reactivation if Reminder is down and there are actions piled up in queues.
+
 [1] For Reminder 5.0.0 CONFIRM_QUEUE is renamed to UNCONFIRMED_QUEUE
 [2] `done`: boolean, `status`: - if done: true - confirmed_after_NUMBER - if done: false - dropped or max_retries, `date`: timestamp
 [3] attempts is 1 by default, we also count first email sent (which is not a retry)
