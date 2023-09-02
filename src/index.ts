@@ -35,6 +35,7 @@ const remindExchange = process.env.REMIND_EXCHANGE || args.qe || "";
 const retryArray = (process.env.RETRY_INTERVAL || "2,3").split(",").map(x => parseInt(x)).filter(x => x > 0);
 const maxRetries = retryArray.length + 1;
 const jobInterval = process.env.JOB_INTERVAL || '0 10 * * *'
+const concurency = process.env.CONCURENCY ? parseInt(process.env.CONCURENCY) : 1;
 
 // debug
 const debugDayOffset = parseInt(process.env.ADD_DAYS || args.A || "0");
@@ -110,6 +111,8 @@ if (argv.run) {
 });
 }
 
+
+
 if (argv.run || argv.get_unconfirmed) {
   syncQueue(amqp_url, queueUnconfirmed, async (action: ActionMessageV2 | EventMessageV2) => {
     if (action.schema === 'proca:action:2' && action.contact.dupeRank === 0) {
@@ -143,6 +146,10 @@ if (argv.run || argv.get_unconfirmed) {
       await db.del('action-' + action.actionId);
       await db.del('retry-' + action.actionId);
     } else {
+      if (action.schema === 'proca:action:2' && action.contact.dupeRank) {
+        console.log(`Action ${action.actionId} is duplicate, skipping`);
+        return true;
+      };
       console.error(`Completely unexpected event", ${queueUnconfirmed}`);
       return false;
     }
