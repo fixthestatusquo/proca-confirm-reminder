@@ -13,7 +13,7 @@ const help = () => {
     [
       "--help (this command)",
       "--get_unconfirmed - if reminder was down, run this first",
-      "--run",
+      "--run (or without arguments) - start reminder",
     ].join("\n")
   );
   process.exit();
@@ -21,6 +21,14 @@ const help = () => {
 
 const argv: ParsedArgs = minimist(process.argv.slice(2));
 argv.help && help();
+if (!argv.run) {
+  argv.run = process.argv.length === 2 ? true : false;
+}
+if (!(argv.run || argv.get_unconfirmed)) {
+  console.error("Missing or unknown param");
+  help();
+  process.exit();
+}
 
 dotenv.config();
 

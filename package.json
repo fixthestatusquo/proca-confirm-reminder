@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "remind": "ts-node ./src/index.ts --run",
+    "start": "ts-node ./src/index.ts",
     "unconfirmed": "ts-node ./src/index.ts --get_unconfirmed",
     "help": "ts-node ./src/index.ts --help",
     "build": "tsc"
